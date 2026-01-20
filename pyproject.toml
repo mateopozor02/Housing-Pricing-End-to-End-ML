@@ -13,6 +13,7 @@ dependencies = [
     "matplotlib>=3.10.8",
     "mlflow>=3.7.0",
     "numpy>=2.2.6",
+    "optuna>=4.7.0",
     "pandas>=2.3.3",
     "scikit-learn>=1.7.2",
     "seaborn>=0.13.2",
