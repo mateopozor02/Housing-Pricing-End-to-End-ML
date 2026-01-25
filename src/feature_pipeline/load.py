@@ -31,9 +31,9 @@ def load_and_split_data(
     # Save the splits
     outdir = Path(output_dir)
     outdir.mkdir(parents=True, exist_ok=True)
-    train_df.to_csv(outdir / "train.csv", index=False)
-    test_df.to_csv(outdir / "test.csv", index=False)
-    holdout_df.to_csv(outdir / "holdout.csv", index=False)
+    train_df.to_csv(outdir / "train_data.csv", index=False)
+    test_df.to_csv(outdir / "test_data.csv", index=False)
+    holdout_df.to_csv(outdir / "holdout_data.csv", index=False)
 
     print(
         f"   Train: {train_df.shape}, Test: {test_df.shape}, Holdout: {holdout_df.shape}"
