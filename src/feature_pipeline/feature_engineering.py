@@ -4,6 +4,8 @@ This module includes functions for creating and transforming features from prepr
 Also, we save fitted encoders for inference time.
 """
 
+from __future__ import annotations
+
 import pandas as pd
 from pathlib import Path
 from category_encoders import TargetEncoder
