@@ -127,6 +127,7 @@ mlruns/         # MLFlow experiment tracking
 
 ## Running the Feature Pipeline
 
+
 ```bash
 # Step 1: Load and split raw data
 uv run python src/feature_pipeline/load.py
@@ -150,6 +151,7 @@ run_feature_engineering_pipeline()
 
 ## Running the Training Pipeline
 
+
 ```bash
 # Step 1: Train model with default parameters
 uv run python src/training_pipeline/train.py
@@ -160,6 +162,18 @@ uv run python src/training_pipeline/test.py
 # Step 3 (Optional): Hyperparameter tuning with Optuna
 uv run python src/training_pipeline/tune.py
 ```
+
+### Running the Inference Pipeline
+
+To run the inference pipeline, ensure you are executing from the project root and that Python can find the `src` package. If you encounter `No module named src`, set the `PYTHONPATH` to the project root:
+
+```bash
+PYTHONPATH=. uv run python src/inference_pipeline/inference.py --input <raw_csv> --output <predictions_csv>
+```
+
+This ensures absolute imports like `from src.feature_pipeline.preprocess import ...` work correctly. The inference pipeline will preprocess, feature engineer, align columns, and generate predictions using the trained model.
+
+**Note:** Always use absolute imports and run scripts from the project root. If you use a different working directory, set `PYTHONPATH` accordingly.
 
 Or run individual functions programmatically:
 
