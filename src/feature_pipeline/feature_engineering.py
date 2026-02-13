@@ -136,3 +136,7 @@ def run_feature_engineering_pipeline(
     holdout.to_csv(out_holdout_path, index=False)
 
     return train, test, holdout, frequency_map, target_encoder
+
+
+if __name__ == "__main__":
+    run_feature_engineering_pipeline()
