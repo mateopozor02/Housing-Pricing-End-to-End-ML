@@ -114,6 +114,8 @@ src/
     train.py
     test.py
     tune.py
+scripts/
+    s3_upload.py        
 models/         # Saved encoders and models (.pkl files)
 notebooks/      # Jupyter notebooks for exploration and experimentation
 tests/          # Test directory with comprehensive test coverage
