@@ -101,11 +101,6 @@ def predict(
     out["predicted_price"] = predictions
     if y_true is not None:
         out["actual_price"] = y_true
-        # Calculate r2 error
-        from sklearn.metrics import r2_score
-
-        r2 = r2_score(y_true, predictions)
-        print(f"R2 error: {r2:.4f}")
 
     return out
 
