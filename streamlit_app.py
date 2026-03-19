@@ -15,6 +15,8 @@ import boto3
 import os
 from pathlib import Path
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,6 +55,76 @@ def load_from_s3(key: str, local_path: str) -> str:
             st.error(f"Failed to download {key} from S3: {e}")
             raise
     return str(local_path)
+
+
+def batch_predictions(
+    payload: list[dict],
+    batch_size: int = 100,
+    timeout: int = 120,
+    max_workers: int = 5,
+) -> list:
+    """Make predictions in parallel batches to improve speed."""
+    if not payload:
+        return []
+
+    total_batches = (len(payload) + batch_size - 1) // batch_size
+    all_predictions = [None] * len(payload)  # Pre-allocate to maintain order
+
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    lock = Lock()
+    completed_count = 0
+
+    def process_batch(batch_info: tuple) -> tuple:
+        """Process a single batch and return results with position info."""
+        batch_idx, batch_start, batch = batch_info
+        try:
+            resp = requests.post(API_URL, json=batch, timeout=timeout)
+            resp.raise_for_status()
+            batch_preds = resp.json().get("predictions", [])
+            return batch_idx, batch_start, batch_preds, None
+        except Exception as e:
+            return batch_idx, batch_start, None, e
+
+    # Prepare batch list
+    batches = []
+    for i, batch_start in enumerate(range(0, len(payload), batch_size)):
+        batch_end = min(batch_start + batch_size, len(payload))
+        batch = payload[batch_start:batch_end]
+        batches.append((i + 1, batch_start, batch))
+
+    # Process batches with threading
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(process_batch, batch): i for i, batch in enumerate(batches)
+        }
+
+        for future in as_completed(futures):
+            try:
+                batch_idx, batch_start, batch_preds, error = future.result()
+                if error:
+                    st.error(f"Batch {batch_idx} failed: {error}")
+                    raise error
+
+                # Store predictions in correct positions
+                for j, pred in enumerate(batch_preds):
+                    all_predictions[batch_start + j] = pred
+
+                with lock:
+                    completed_count += 1
+                    status_text.text(
+                        f"Processing batches... {completed_count}/{total_batches} completed"
+                    )
+                    progress_bar.progress(completed_count / total_batches)
+
+            except Exception as e:
+                st.error(f"Error: {e}")
+                raise
+
+    status_text.empty()
+    progress_bar.empty()
+
+    return all_predictions
 
 
 # ============================================================================
@@ -173,7 +245,7 @@ if st.button("Show Predictions 🚀", width="stretch"):
         try:
             # Call API
             with st.spinner("Making predictions..."):
-                resp = requests.post(API_URL, json=payload, timeout=60)
+                resp = requests.post(API_URL, json=payload, timeout=120)
                 resp.raise_for_status()
                 out = resp.json()
 
@@ -240,9 +312,9 @@ if st.button("Show Predictions 🚀", width="stretch"):
                 idx_all = yearly_data.index
                 payload_all = fe_df.loc[idx_all].to_dict(orient="records")
 
-                resp_all = requests.post(API_URL, json=payload_all, timeout=60)
-                resp_all.raise_for_status()
-                preds_all = resp_all.json().get("predictions", [])
+                preds_all = batch_predictions(
+                    payload_all, batch_size=1200, max_workers=8
+                )
 
                 yearly_data["prediction"] = pd.Series(
                     preds_all, index=yearly_data.index
@@ -254,9 +326,9 @@ if st.button("Show Predictions 🚀", width="stretch"):
                 idx_region = yearly_data.index
                 payload_region = fe_df.loc[idx_region].to_dict(orient="records")
 
-                resp_region = requests.post(API_URL, json=payload_region, timeout=60)
-                resp_region.raise_for_status()
-                preds_region = resp_region.json().get("predictions", [])
+                preds_region = batch_predictions(
+                    payload_region, batch_size=1200, max_workers=8
+                )
 
                 yearly_data["prediction"] = pd.Series(
                     preds_region, index=yearly_data.index
