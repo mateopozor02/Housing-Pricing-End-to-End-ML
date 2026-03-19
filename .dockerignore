@@ -1,0 +1,102 @@
+# Version Control
+.git
+.gitignore
+.gitattributes
+
+# IDE and Editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+.env.local
+.env.*.local
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+htmlcov/
+
+# Testing
+.pytest_cache
+.hypothesis
+
+# Documentation
+docs/_build/
+site/
+
+# MLFlow
+mlruns/
+.mlflow
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
+notebooks/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# OS
+Thumbs.db
+.DS_Store
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.circleci/
+
+# Docker
+docker-compose.override.yml
+Dockerfile*
+
+# Miscellaneous
+*.log
+.venv
+temp/
+tmp/
+.wait-for-it.sh
+
+# Project specific
+scripts/
+tests/
+README.md
+AGENTS.md
+LICENSE
