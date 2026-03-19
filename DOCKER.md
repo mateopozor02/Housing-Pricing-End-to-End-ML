@@ -300,17 +300,255 @@ services:
 docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
-### Kubernetes Deployment
+### AWS ECS Deployment with Load Balancing
 
-Use Docker images as base for Kubernetes deployment:
+Deploy to AWS using ECR and ECS with Application Load Balancer:
+
+#### Step 1: Create ECR Repositories
 
 ```bash
-# Tag for deployment
-docker tag housing-api:latest gcr.io/your-project/housing-api:latest
-docker push gcr.io/your-project/housing-api:latest
+# Login to ECR
+aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com
+
+# Create ECR repositories
+aws ecr create-repository --repository-name housing-api --region us-east-2
+aws ecr create-repository --repository-name housing-ui --region us-east-2
 ```
 
-Then create Kubernetes manifests using the same image.
+#### Step 2: Build and Push Docker Images to ECR
+
+```bash
+# Set variables
+AWS_ACCOUNT_ID=<YOUR_AWS_ACCOUNT_ID>
+AWS_REGION=us-east-2
+ECR_BACKEND_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/housing-api
+ECR_FRONTEND_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/housing-ui
+
+# Build backend image
+docker build -f Dockerfile.backend -t $ECR_BACKEND_URI:latest .
+docker push $ECR_BACKEND_URI:latest
+
+# Build frontend image
+docker build -f Dockerfile.frontend -t $ECR_FRONTEND_URI:latest .
+docker push $ECR_FRONTEND_URI:latest
+```
+
+#### Step 3: Create ECS Task Definitions
+
+Create task definitions for backend and frontend services:
+
+**Backend Task Definition** (`housing-backend-task.json`):
+```json
+{
+  "family": "housing-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "containerDefinitions": [
+    {
+      "name": "housing-api",
+      "image": "<YOUR_AWS_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/housing-api:latest",
+      "portMappings": [
+        {"containerPort": 8000, "hostPort": 8000, "protocol": "tcp"}
+      ],
+      "environment": [
+        {"name": "S3_BUCKET", "value": "housing-pricing-regression-data"},
+        {"name": "AWS_REGION", "value": "us-east-2"},
+        {"name": "MLFLOW_TRACKING_URI", "value": "http://localhost:5000"}
+      ],
+      "secrets": [
+        {"name": "AWS_ACCESS_KEY_ID", "valueFrom": "arn:aws:secretsmanager:us-east-2:<ACCOUNT>:secret:housing-api-keys"},
+        {"name": "AWS_SECRET_ACCESS_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-2:<ACCOUNT>:secret:housing-api-keys"}
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/housing-api",
+          "awslogs-region": "us-east-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ],
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT>:role/ecsTaskExecutionRole"
+}
+```
+
+**Frontend Task Definition** (`housing-frontend-task.json`):
+```json
+{
+  "family": "housing-frontend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "containerDefinitions": [
+    {
+      "name": "housing-ui",
+      "image": "<YOUR_AWS_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/housing-ui:latest",
+      "portMappings": [
+        {"containerPort": 8501, "hostPort": 8501, "protocol": "tcp"}
+      ],
+      "environment": [
+        {"name": "API_URL", "value": "http://housing-api-alb-<ID>.us-east-2.elb.amazonaws.com:8000/predict"},
+        {"name": "S3_BUCKET", "value": "housing-pricing-regression-data"},
+        {"name": "AWS_REGION", "value": "us-east-2"}
+      ],
+      "secrets": [
+        {"name": "AWS_ACCESS_KEY_ID", "valueFrom": "arn:aws:secretsmanager:us-east-2:<ACCOUNT>:secret:housing-ui-keys"},
+        {"name": "AWS_SECRET_ACCESS_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-2:<ACCOUNT>:secret:housing-ui-keys"}
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/housing-ui",
+          "awslogs-region": "us-east-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ],
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT>:role/ecsTaskExecutionRole"
+}
+```
+
+#### Step 4: Register Task Definitions
+
+```bash
+# Register backend task
+aws ecs register-task-definition --cli-input-json file://housing-backend-task.json --region us-east-2
+
+# Register frontend task
+aws ecs register-task-definition --cli-input-json file://housing-frontend-task.json --region us-east-2
+```
+
+#### Step 5: Create ECS Services with Load Balancer
+
+```bash
+# Create security group for ALB
+aws ec2 create-security-group \
+  --group-name housing-alb-sg \
+  --description "Security group for Housing API ALB" \
+  --vpc-id vpc-<YOUR_VPC_ID>
+
+# Allow HTTP (80) and HTTPS (443) from internet
+aws ec2 authorize-security-group-ingress \
+  --group-id sg-<YOUR_SG_ID> \
+  --protocol tcp \
+  --port 80 \
+  --cidr 0.0.0.0/0
+
+aws ec2 authorize-security-group-ingress \
+  --group-id sg-<YOUR_SG_ID> \
+  --protocol tcp \
+  --port 8000 \
+  --cidr 0.0.0.0/0
+
+# Create Application Load Balancer
+aws elbv2 create-load-balancer \
+  --name housing-api-alb \
+  --subnets subnet-<ID1> subnet-<ID2> \
+  --security-groups sg-<YOUR_SG_ID> \
+  --scheme internet-facing \
+  --type application \
+  --region us-east-2
+
+# Create target group for backend (port 8000)
+aws elbv2 create-target-group \
+  --name housing-api-tg \
+  --protocol HTTP \
+  --port 8000 \
+  --vpc-id vpc-<YOUR_VPC_ID> \
+  --health-check-enabled \
+  --health-check-protocol HTTP \
+  --health-check-path /health \
+  --health-check-interval-seconds 30 \
+  --health-check-timeout-seconds 5 \
+  --healthy-threshold-count 2 \
+  --unhealthy-threshold-count 3 \
+  --matcher HttpCode=200 \
+  --region us-east-2
+
+# Create listener for ALB
+aws elbv2 create-listener \
+  --load-balancer-arn arn:aws:elasticloadbalancing:us-east-2:<ACCOUNT>:loadbalancer/app/housing-api-alb/<ID> \
+  --protocol HTTP \
+  --port 80 \
+  --default-actions Type=forward,TargetGroupArn=arn:aws:elasticloadbalancing:us-east-2:<ACCOUNT>:targetgroup/housing-api-tg/<ID> \
+  --region us-east-2
+```
+
+#### Step 6: Create ECS Services
+
+```bash
+# Create backend service
+aws ecs create-service \
+  --cluster housing-cluster \
+  --service-name housing-backend-service \
+  --task-definition housing-backend:1 \
+  --desired-count 2 \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[subnet-<ID1>,subnet-<ID2>],securityGroups=[sg-<ID>],assignPublicIp=ENABLED}" \
+  --load-balancers targetGroupArn=arn:aws:elasticloadbalancing:us-east-2:<ACCOUNT>:targetgroup/housing-api-tg/<ID>,containerName=housing-api,containerPort=8000 \
+  --region us-east-2
+
+# Create frontend service
+aws ecs create-service \
+  --cluster housing-cluster \
+  --service-name housing-frontend-service \
+  --task-definition housing-frontend:1 \
+  --desired-count 1 \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[subnet-<ID1>,subnet-<ID2>],securityGroups=[sg-<ID>],assignPublicIp=ENABLED}" \
+  --region us-east-2
+```
+
+#### Step 7: Set Up Auto Scaling (Optional)
+
+```bash
+# Register scalable target for backend
+aws application-autoscaling register-scalable-target \
+  --service-namespace ecs \
+  --resource-id service/housing-cluster/housing-backend-service \
+  --scalable-dimension ecs:service:DesiredCount \
+  --min-capacity 2 \
+  --max-capacity 10 \
+  --region us-east-2
+
+# Create scaling policy (scale up when CPU > 70%)
+aws application-autoscaling put-scaling-policy \
+  --policy-name housing-backend-scaling \
+  --service-namespace ecs \
+  --resource-id service/housing-cluster/housing-backend-service \
+  --scalable-dimension ecs:service:DesiredCount \
+  --policy-type TargetTrackingScaling \
+  --target-tracking-scaling-policy-configuration \
+    TargetValue=70,PredefinedMetricSpecification='{PredefinedMetricType=ECSServiceAverageCPUUtilization}' \
+  --region us-east-2
+```
+
+#### Accessing Your Deployment
+
+```bash
+# Get Load Balancer DNS
+aws elbv2 describe-load-balancers \
+  --names housing-api-alb \
+  --query 'LoadBalancers[0].DNSName' \
+  --region us-east-2
+
+# Access services
+# Backend API: http://<ALB_DNS>:8000
+# API Docs: http://<ALB_DNS>:8000/docs
+# Health Check: http://<ALB_DNS>:8000/health
+```
 
 ## Troubleshooting
 
