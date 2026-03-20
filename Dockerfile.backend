@@ -62,7 +62,6 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY --chown=appuser:appuser src ./src
 COPY --chown=appuser:appuser models ./models
-COPY --chown=appuser:appuser data ./data
 
 # Switch to non-root user
 USER appuser
