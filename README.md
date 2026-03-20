@@ -246,6 +246,80 @@ The project uses **multi-stage Docker builds** for optimal image size and securi
 - Docker layer caching for faster rebuilds
 - Enhanced security with minimal attack surface
 
+#### Data Handling
+
+**Important**: Docker images do NOT include the `data/` folder for the following reasons:
+
+1. **Reduced Image Size**: Data files can be large; keeping images lean
+2. **Separation of Concerns**: Models and code are versioned separately from data
+3. **Flexible Data Sources**: Data is fetched from AWS S3 at runtime:
+   - Model downloads from S3 if not cached locally
+   - Feature-engineered datasets downloaded on demand
+   - Holdout data retrieved by Streamlit frontend
+4. **Cloud-Native Design**: Supports horizontal scaling without data replication
+
+Files included in Docker images:
+- Application code (`src/`)
+- Trained models (`models/` - serialized as .pkl files)
+- Streamlit app (`streamlit_app.py`)
+- Dependencies (via Python virtual environment)
+
+### Continuous Integration & Deployment (CI/CD)
+
+GitHub Actions automates building, testing, and deploying the application to AWS ECS.
+
+#### CI/CD Pipeline (`.github/workflows/ci.yml`)
+
+**Trigger**: Automatically runs on push to `main` branch
+
+**Steps**:
+1. **Checkout**: Clone repository code
+2. **AWS Authentication**: Configure AWS credentials from GitHub secrets
+3. **ECR Login**: Authenticate with Amazon Elastic Container Registry
+4. **Backend Build & Push**:
+   - Builds `Dockerfile.backend` image
+   - Tags with git commit SHA for version tracking
+   - Pushes to ECR repository
+5. **Backend Deploy**: Updates ECS service to use new image
+6. **Frontend Build & Push**:
+   - Builds `Dockerfile.frontend` image
+   - Tags with git commit SHA
+   - Pushes to ECR repository
+7. **Frontend Deploy**: Updates ECS service to use new image
+
+#### Required GitHub Secrets
+
+Configure these in your GitHub repository settings (`Settings → Secrets and variables → Actions`):
+
+```
+AWS_ACCESS_KEY_ID          # AWS account access key
+AWS_SECRET_ACCESS_KEY      # AWS account secret key
+AWS_REGION                 # AWS region (e.g., us-east-2)
+ECR_REPOSITORY_BACKEND     # Backend ECR repository name
+ECR_REPOSITORY_FRONTEND    # Frontend ECR repository name
+ECS_CLUSTER                # ECS cluster name
+ECS_SERVICE_BACKEND        # Backend ECS service name
+ECS_SERVICE_FRONTEND       # Frontend ECS service name
+```
+
+#### Deployment Flow
+
+```
+Developer Push to main
+  ↓
+GitHub Actions Triggered
+  ↓
+Build Backend & Frontend Docker Images
+  ↓
+Push Images to AWS ECR
+  ↓
+Update ECS Services
+  ↓
+Applications Deployed on AWS
+```
+
+**Example**: When you push to `main`, both services are automatically built, pushed to ECR, and deployed within minutes.
+
 ### Local Development with Docker Compose
 
 ```bash
