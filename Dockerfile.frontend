@@ -63,7 +63,6 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY --chown=appuser:appuser streamlit_app.py ./
-COPY --chown=appuser:appuser data ./data
 
 # Create Streamlit config directory and config file
 RUN mkdir -p ~/.streamlit && \
